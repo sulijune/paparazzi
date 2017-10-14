@@ -54,18 +54,34 @@
 #include "mcu_periph/gpio.h"
 #include "hal.h"
 #include "std.h"
+#include "mcu_periph/ram_arch.h"
 
-// From active ADC channels
-//#define ADC_NUM_CHANNELS NB_ADC
 
 // Macros to automatically enable the correct ADC
-
 // FIXME we can't use NB_ADC1_CHANNELS it is not a macro
 //#if NB_ADC1_CHANNELS != 0
 #ifndef USE_AD1
 #define USE_AD1 1
 #endif
 ///#endif
+
+
+// architecture dependent settings
+#if defined(__STM32F10x_H) || defined(__STM32F105xC_H) || defined (__STM32F107xC_H)
+// STM32F1xx
+#define ADC_SAMPLE_RATE ADC_SAMPLE_41P5
+#define ADC_CR2_CFG ADC_CR2_TSVREFE
+#elif defined(__STM32F4xx_H) || defined(__STM32F7xx_H)
+// STM32F4xx | STM32F7xx
+#define ADC_SAMPLE_RATE ADC_SAMPLE_480
+#define ADC_CR2_CFG ADC_CR2_SWSTART
+#elif defined(__STM32F373xC_H)
+#define ADC_SAMPLE_RATE ADC_SAMPLE_239P5
+#define ADC_CR2_CFG ADC_CR2_SWSTART
+#elif defined(__STM32F3xx_H)
+#define ADC_SAMPLE_RATE ADC_SMPR_SMP_601P5
+#endif
+
 
 // Create channel map
 static const uint8_t adc_channel_map[ADC_NUM_CHANNELS] = {
@@ -127,7 +143,7 @@ ADCDriver *adcp_err = NULL;
 #ifndef ADC_BUF_DEPTH
 #define ADC_BUF_DEPTH (MAX_AV_NB_SAMPLE/2)
 #endif
-static adcsample_t adc_samples[ADC_NUM_CHANNELS * ADC_BUF_DEPTH];
+static IN_DMA_SECTION(adcsample_t adc_samples[ADC_NUM_CHANNELS * ADC_BUF_DEPTH]);
 
 #if USE_AD1
 static struct adc_buf *adc1_buffers[ADC_NUM_CHANNELS];
@@ -235,7 +251,7 @@ void adc1callback(ADCDriver *adcp, adcsample_t *buffer, size_t n)
         (adc_watchdog.cb != NULL)) {
       if (adc1_buffers[adc_watchdog.channel]->sum <
           (adc1_buffers[adc_watchdog.channel]->av_nb_sample * adc_watchdog.vmin)) {
-        adc_watchdog.cb ();
+        adc_watchdog.cb();
       }
     }
 #endif // USE_ADC_WATCHDOG
@@ -264,6 +280,8 @@ static void adcerrorcallback(ADCDriver *adcp, adcerror_t err)
  */
 void adc_buf_channel(uint8_t adc_channel, struct adc_buf *s, uint8_t av_nb_sample)
 {
+  // check for out-of-bounds access
+  if (adc_channel >= ADC_NUM_CHANNELS) { return; }
   adc1_buffers[adc_channel] = s;
   if (av_nb_sample <= MAX_AV_NB_SAMPLE) {
     s->av_nb_sample = av_nb_sample;
@@ -324,39 +342,52 @@ void adc_init(void)
   gpio_setup_pin_analog(ADC_9_GPIO_PORT, ADC_9_GPIO_PIN);
 #endif
 
-  // Configurtion register
+  // Configuration register
   uint32_t sqr1, sqr2, sqr3;
   adc_regular_sequence(&sqr1, &sqr2, &sqr3, ADC_NUM_CHANNELS, adc_channel_map);
 
-#ifdef __STM32F10x_H
   uint32_t smpr1, smpr2;
-  adc_sample_time_on_all_channels(&smpr1, &smpr2, ADC_SAMPLE_41P5);
-
-  adcgrpcfg.cr2 = ADC_CR2_TSVREFE;
-#elif defined(__STM32F4xx_H)
-  uint32_t smpr1, smpr2;
-  adc_sample_time_on_all_channels(&smpr1, &smpr2, ADC_SAMPLE_480);
-
-  adcgrpcfg.cr2 = ADC_CR2_SWSTART;
-#endif
+  adc_sample_time_on_all_channels(&smpr1, &smpr2, ADC_SAMPLE_RATE);
 
 #if USE_ADC_WATCHDOG
   adc_watchdog.adc = NULL;
   adc_watchdog.cb = NULL;
   adc_watchdog.channel = 0;
-  adc_watchdog.vmin = (1<<12)-1; // max adc
+  adc_watchdog.vmin = (1 << 12) - 1; // max adc
 #endif
 
   adcgrpcfg.circular = TRUE;
   adcgrpcfg.num_channels = ADC_NUM_CHANNELS;
   adcgrpcfg.end_cb = adc1callback;
   adcgrpcfg.error_cb = adcerrorcallback;
+#if defined(__STM32F373xC_H)
+  adcgrpcfg.u.adc.smpr[0] = smpr1;
+  adcgrpcfg.u.adc.smpr[1] = smpr2;
+  adcgrpcfg.u.adc.sqr[0] = sqr1;
+  adcgrpcfg.u.adc.sqr[1] = sqr2;
+  adcgrpcfg.u.adc.sqr[2] = sqr3;
+  adcgrpcfg.u.adc.cr1 = 0;
+  adcgrpcfg.u.adc.cr2 = ADC_CR2_CFG;
+#elif defined(__STM32F3xx_H)
+  //TODO: check if something needs to be done with the other regs (can be found in ~/paparazzi/sw/ext/chibios/os/hal/ports/STM32/LLD/ADCv3)
+#warning ADCs not tested with stm32f30
+  // cfgr
+  // tr1
+
+  adcgrpcfg.smpr[0] = smpr1; // is this even correct?
+  adcgrpcfg.smpr[1] = smpr2;
+  adcgrpcfg.sqr[0]  = sqr1;
+  adcgrpcfg.sqr[1]  = sqr2;
+  adcgrpcfg.sqr[2]  = sqr3;
+#else
+  adcgrpcfg.cr2 = ADC_CR2_CFG;
   adcgrpcfg.cr1 = 0;
   adcgrpcfg.smpr1 = smpr1;
   adcgrpcfg.smpr2 = smpr2;
   adcgrpcfg.sqr1 = sqr1;
   adcgrpcfg.sqr2 = sqr2;
   adcgrpcfg.sqr3 = sqr3;
+#endif
 
   // Start ADC in continious conversion mode
   adcStart(&ADCD1, NULL);
@@ -365,9 +396,9 @@ void adc_init(void)
 
 #if USE_ADC_WATCHDOG
 void register_adc_watchdog(ADCDriver *adc, adc_channels_num_t channel, adcsample_t vmin,
-			   adc_watchdog_callback cb)
+                           adc_watchdog_callback cb)
 {
-  for (int i=0; i< NB_ADC1_CHANNELS; i++) { // FIXME when more than ADC1 will be in use
+  for (int i = 0; i < NB_ADC1_CHANNELS; i++) { // FIXME when more than ADC1 will be in use
     if (adc_channel_map[i] == channel) {
       adc_watchdog.adc = adc;
       adc_watchdog.channel = i;

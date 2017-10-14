@@ -61,14 +61,7 @@ PRINT_CONFIG_VAR(IMU_MPU9250_SMPLRT_DIV)
 PRINT_CONFIG_VAR(IMU_MPU9250_GYRO_LOWPASS_FILTER)
 PRINT_CONFIG_VAR(IMU_MPU9250_ACCEL_LOWPASS_FILTER)
 
-#ifndef IMU_MPU9250_GYRO_RANGE
-#define IMU_MPU9250_GYRO_RANGE MPU9250_GYRO_RANGE_1000
-#endif
 PRINT_CONFIG_VAR(IMU_MPU9250_GYRO_RANGE)
-
-#ifndef IMU_MPU9250_ACCEL_RANGE
-#define IMU_MPU9250_ACCEL_RANGE MPU9250_ACCEL_RANGE_8G
-#endif
 PRINT_CONFIG_VAR(IMU_MPU9250_ACCEL_RANGE)
 
 #ifndef IMU_MPU9250_I2C_ADDR
@@ -89,6 +82,19 @@ PRINT_CONFIG_VAR(IMU_MPU9250_CHAN_Y)
 #define IMU_MPU9250_CHAN_Z 2
 #endif
 PRINT_CONFIG_VAR(IMU_MPU9250_CHAN_Z)
+
+#ifndef IMU_MPU9250_X_SIGN
+#define IMU_MPU9250_X_SIGN 1
+#endif
+PRINT_CONFIG_VAR(IMU_MPU9250_X_SIGN)
+#ifndef IMU_MPU9250_Y_SIGN
+#define IMU_MPU9250_Y_SIGN 1
+#endif
+PRINT_CONFIG_VAR(IMU_MPU9250_Y_SIGN)
+#ifndef IMU_MPU9250_Z_SIGN
+#define IMU_MPU9250_Z_SIGN 1
+#endif
+PRINT_CONFIG_VAR(IMU_MPU9250_Z_SIGN)
 
 
 struct ImuMpu9250 imu_mpu9250;
@@ -120,14 +126,14 @@ void imu_mpu9250_event(void)
   if (imu_mpu9250.mpu.data_available) {
     // set channel order
     struct Int32Vect3 accel = {
-      (int32_t)(imu_mpu9250.mpu.data_accel.value[IMU_MPU9250_CHAN_X]),
-      (int32_t)(imu_mpu9250.mpu.data_accel.value[IMU_MPU9250_CHAN_Y]),
-      (int32_t)(imu_mpu9250.mpu.data_accel.value[IMU_MPU9250_CHAN_Z])
+      IMU_MPU9250_X_SIGN *(int32_t)(imu_mpu9250.mpu.data_accel.value[IMU_MPU9250_CHAN_X]),
+      IMU_MPU9250_Y_SIGN *(int32_t)(imu_mpu9250.mpu.data_accel.value[IMU_MPU9250_CHAN_Y]),
+      IMU_MPU9250_Z_SIGN *(int32_t)(imu_mpu9250.mpu.data_accel.value[IMU_MPU9250_CHAN_Z])
     };
     struct Int32Rates rates = {
-      (int32_t)(imu_mpu9250.mpu.data_rates.value[IMU_MPU9250_CHAN_X]),
-      (int32_t)(imu_mpu9250.mpu.data_rates.value[IMU_MPU9250_CHAN_Y]),
-      (int32_t)(imu_mpu9250.mpu.data_rates.value[IMU_MPU9250_CHAN_Z])
+      IMU_MPU9250_X_SIGN *(int32_t)(imu_mpu9250.mpu.data_rates.value[IMU_MPU9250_CHAN_X]),
+      IMU_MPU9250_Y_SIGN *(int32_t)(imu_mpu9250.mpu.data_rates.value[IMU_MPU9250_CHAN_Y]),
+      IMU_MPU9250_Z_SIGN *(int32_t)(imu_mpu9250.mpu.data_rates.value[IMU_MPU9250_CHAN_Z])
     };
     // unscaled vector
     VECT3_COPY(imu.accel_unscaled, accel);
@@ -140,19 +146,20 @@ void imu_mpu9250_event(void)
     AbiSendMsgIMU_GYRO_INT32(IMU_MPU9250_ID, now_ts, &imu.gyro);
     AbiSendMsgIMU_ACCEL_INT32(IMU_MPU9250_ID, now_ts, &imu.accel);
   }
-
+#if IMU_MPU9250_READ_MAG
   // Test if mag data are updated
   if (imu_mpu9250.mpu.akm.data_available) {
     struct Int32Vect3 mag = {
-      (int32_t)(imu_mpu9250.mpu.akm.data.value[IMU_MPU9250_CHAN_Y]),
-      (int32_t)(imu_mpu9250.mpu.akm.data.value[IMU_MPU9250_CHAN_X]),
-      -(int32_t)(imu_mpu9250.mpu.akm.data.value[IMU_MPU9250_CHAN_Z])
+      IMU_MPU9250_X_SIGN *(int32_t)(imu_mpu9250.mpu.akm.data.value[IMU_MPU9250_CHAN_Y]),
+      IMU_MPU9250_Y_SIGN *(int32_t)(imu_mpu9250.mpu.akm.data.value[IMU_MPU9250_CHAN_X]),
+      -IMU_MPU9250_Z_SIGN *(int32_t)(imu_mpu9250.mpu.akm.data.value[IMU_MPU9250_CHAN_Z])
     };
     VECT3_COPY(imu.mag_unscaled, mag);
     imu_mpu9250.mpu.akm.data_available = false;
     imu_scale_mag(&imu);
     AbiSendMsgIMU_MAG_INT32(IMU_MPU9250_ID, now_ts, &imu.mag);
-  }
 
+  }
+#endif
 }
 
